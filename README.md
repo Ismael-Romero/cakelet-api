@@ -1,2 +1,2 @@
-# cakelet-suite
+# Cakelet Suite
 I want a cupcake :D
