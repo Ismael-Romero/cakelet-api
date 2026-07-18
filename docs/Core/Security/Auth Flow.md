@@ -1,157 +1,106 @@
 # Authentication Flow
-**Fecha de actualización**: 18 de Julio de 2026. <br/>
-Actualizado por: Ismael Romero.
------
 
-## Introduction
-Cakelet has been designed with security and access control as fundamental principles. 
-For this reason, every interaction with the platform begins with the authentication 
-process and the validation of user credentials.
-
-Although the documentation in this repository is primarily focused on the API,
-it is equally important for user interface components to understand the architecture
-and workflows that underpin the platform. The business logic forms the core of the system
-and defines the behavior of every interaction; consequently, the user interface acts as a consumer of this logic,
-without which it would be impossible to ensure consistent, secure, and predictable system behavior.
-
-## 1. Primary Authentication Flow
-
-### 1.1 Access Request
-
-The client submits the user's credentials (username and password) through the login form to the authentication endpoint.
-
-### 1.2 Process Initiation
-
-The authentication endpoint receives the request and initiates the identity validation process by querying the user information stored in the database.
-
-### 1.3 User Existence Validation
-
-The system verifies whether the provided username (or unique identifier) exists.
-
-#### If the user does not exist
-
-- Record a failed authentication attempt in the access log.
-- Terminate the authentication flow.
-- Return a generic authentication error to the client to prevent user enumeration.
-
-### 1.4 Failed Attempts Lock Validation
-
-The system verifies whether the account has been temporarily locked because the maximum number of failed login attempts has been exceeded.
-
-### 1.5 Administrative Lock Validation
-
-The system verifies whether the account has been explicitly locked by a system administrator.
-
-#### If the account is locked
-
-- Record a failed authentication attempt in the access log.
-- Terminate the authentication flow.
-- Return an account locked response to the client.
-
-### 1.6 Password Verification
-
-The submitted password is processed using the corresponding password hashing algorithm and compared against the securely stored password hash.
-
-#### If the password is incorrect
-
-- Record a failed authentication attempt.
-- Increment the user's failed login attempts counter by one.
-- If the counter reaches the configured threshold, update the user's status to **Locked**.
-- Terminate the authentication flow.
-- Return an authentication error to the client.
-
-### 1.7 Two-Factor Authentication (2FA) Evaluation
-
-The system verifies whether the user has Two-Factor Authentication enabled.
-
-#### If 2FA is enabled
-
-- Generate a cryptographically secure verification code.
-- Send the verification code to the user's registered email address.
-- Generate a signed Temporary Transition Token (JWT) with:
-    - Maximum lifetime of **3 minutes**.
-    - Embedded `user_id` claim.
-- Return the temporary token to the client.
-- Request completion of the 2FA challenge.
-- Continue with the process described in **Section 2: 2FA Validation Flow**.
-
-### 1.8 Successful Authentication (Without 2FA)
-
-If the credentials are valid and 2FA is not enabled:
-
-- Record a successful authentication event.
-- Reset the failed login attempts counter to **0**.
-- Retrieve the user's profile information:
-    - `user_id`
-    - First name
-    - Last name
-    - Nickname
-    - Profile image URL
-- Generate an **Access Token** with a lifetime of **1 hour**.
-- Generate and persist a **Refresh Token** with a lifetime of **1 hour and 10 minutes**.
-- Construct the JSON response containing:
-    - Access Token
-    - Refresh Token
-    - User profile
-- Return **HTTP 200 OK** to the client.
+**Last Updated:** July 18, 2026  
+**Author:** Ismael Romero
 
 ---
 
-## 2. 2FA Validation Flow
+# Introduction
 
-### 2.1 Verification Code Reception
+Authentication represents the entry point to every protected resource within the Cakelet
+platform. Because authentication is responsible for establishing the user's identity,
+all subsequent authorization decisions depend on the correctness of this process.
 
-The user receives the verification code in their registered email inbox.
+The authentication subsystem has therefore been designed following a security-first
+approach. Rather than limiting itself to credential verification, it incorporates
+multiple validation stages intended to mitigate common attack vectors such as user
+enumeration, brute-force attacks, credential stuffing, replay attempts, and unauthorized
+access to suspended accounts.
 
-### 2.2 Challenge Submission
+The authentication workflow is divided into two independent phases. The first phase
+validates the user's identity and determines whether an additional authentication factor
+is required. The second phase, executed only when Two-Factor Authentication (2FA) is
+enabled, validates possession of the temporary verification code before issuing the
+definitive session tokens.
 
-The user enters the verification code into the client application.
+---
 
-The frontend submits a request to the 2FA endpoint including:
+# Primary Authentication Flow
 
-- Verification code
-- Temporary Transition Token (JWT)
+The authentication process begins when the client submits the user's credentials to the
+authentication endpoint. Upon receiving the request, the Authentication Service retrieves
+the corresponding user record from the persistence layer and performs a sequence of
+security validations.
 
-### 2.3 Temporary Token Validation
+The first validation determines whether the supplied identifier exists in the system.
+Whenever no matching account is found, the authentication process is immediately
+terminated. A failed authentication event is recorded while a generic error response is
+returned to the client. This behavior intentionally prevents user enumeration attacks by
+avoiding any indication of whether a particular account exists.
 
-The system:
+If the account exists, the system verifies whether access is currently prohibited.
+Two independent lock mechanisms are evaluated. The first determines whether the account
+has been temporarily suspended due to repeated authentication failures, whereas the
+second verifies whether the account has been administratively disabled.
 
-- Decodes the Temporary Transition Token.
-- Verifies its cryptographic signature.
-- Confirms that the token has not expired (maximum validity: **3 minutes**).
+Whenever either condition is satisfied, the authentication request is rejected,
+the event is logged, and the client receives an account locked response.
 
-### 2.4 Verification Code Validation
+Only after these preliminary validations have succeeded does the Authentication Service
+proceed with password verification. The submitted password is processed using the
+configured password hashing algorithm and compared against the stored password hash.
+Authentication failures increment the user's failed-attempt counter. Once the configured
+threshold is exceeded, the account is automatically transitioned to the locked state.
 
-The submitted verification code is compared against the code generated for the corresponding authentication session.
+Following successful credential validation, the system determines whether the user has
+enabled Two-Factor Authentication. If no second authentication factor is required,
+the authentication process concludes by generating the definitive Access Token and
+Refresh Token, retrieving the user's profile information, resetting the failed-attempt
+counter, and returning an authenticated session to the client.
 
-### 2.5 Challenge Resolution
+When 2FA is enabled, however, the authentication workflow is intentionally interrupted.
+A cryptographically secure verification code is generated and delivered to the user's
+registered email address. Simultaneously, a signed Temporary Transition Token (JWT) is
+created with a maximum lifetime of three minutes. Rather than establishing a session,
+the server returns this temporary token and requests completion of the second
+authentication factor.
 
-#### Successful Validation
+---
 
-If every validation succeeds:
+# Two-Factor Authentication Flow
 
-- Record a successful authentication event.
-- Reset the failed login attempts counter to **0**.
-- Retrieve the user's profile:
-    - `user_id`
-    - First name
-    - Last name
-    - Nickname
-    - Profile image URL
-- Generate an **Access Token** (1 hour).
-- Generate and persist a **Refresh Token** (1 hour and 10 minutes).
-- Return a successful authentication response containing:
-    - Access Token
-    - Refresh Token
-    - User profile
+The second authentication phase begins after the user receives the verification code by
+email. The client submits both the verification code and the Temporary Transition Token
+to the dedicated 2FA endpoint.
 
-#### Failed Validation
+The Authentication Service first validates the Temporary Transition Token by verifying
+its signature and expiration time. Tokens exceeding the permitted lifetime are rejected
+without further processing.
 
-If any validation fails (invalid code or expired token):
+If the token remains valid, the submitted verification code is compared against the code
+generated during the primary authentication phase.
 
-- Record a failed authentication attempt.
-- Increment the failed login attempts counter by one.
-- If the accumulated threshold is reached, lock the user account.
-- Return the appropriate error response, for example:
-    - `Invalid verification code`
-    - `Verification session has expired`
+Successful verification completes the authentication workflow. The failed-attempt counter
+is reset, the user's profile is retrieved, definitive session tokens are generated, and
+the authenticated session is returned to the client.
+
+Conversely, unsuccessful verification results in a failed authentication event being
+recorded and the failed-attempt counter being incremented. Once the configured threshold
+is reached, the account becomes locked. The client receives an error describing whether
+the verification code was invalid or whether the authentication session expired.
+
+---
+
+# Security Considerations
+
+The authentication workflow incorporates several security mechanisms designed to reduce
+the attack surface of the platform.
+
+- Generic authentication responses prevent user enumeration.
+- Failed authentication attempts are centrally logged.
+- Automatic account locking mitigates brute-force attacks.
+- Administrative locks immediately revoke access.
+- Passwords are never compared in plaintext.
+- Temporary Transition Tokens have a short lifetime and are cryptographically signed.
+- Definitive session tokens are issued only after every authentication requirement has
+  been successfully satisfied.
