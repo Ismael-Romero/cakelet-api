@@ -1,5 +1,11 @@
 package main
 
+import "go.uber.org/fx"
+
 func main() {
-	print("Hello world")
+	app := fx.New(
+		fx.Provide(NewConfig),
+		fx.Invoke(TestConfig),
+	)
+	app.Run()
 }
