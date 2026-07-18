@@ -19,6 +19,7 @@ out/
 coverage.html
 
 .idea
+.gemini
 .vscode/
 .DS_Store
 Thumbs.db
