@@ -15,5 +15,18 @@
         "host": "",
         "port": 0,
         "database": ""
+    },
+    "security": {
+        "bcrypt": {
+            "workFactor": 12
+        },
+        "jwt": {
+            "secretKey": "",
+            "accessDurationMinutes": 60
+        },
+        "mfa": {
+            "otpLength": 6,
+            "expirationMinutes": 3
+        }
     }
 }
