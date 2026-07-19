@@ -3,6 +3,7 @@ module github.com/Ismael-Romero/cakelet-suite
 go 1.26.5
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/fx v1.24.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
