@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ type Config struct {
 	Server      HttpServerConfig  `json:"server"`
 	MediaSource MediaSourceConfig `json:"mediaSource"`
 	Database    DatabaseConfig    `json:"dataSource"`
+	Security    SecurityConfig    `json:"security"`
 }
 
 type MediaSourceConfig struct {
@@ -30,6 +31,26 @@ type DatabaseConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Database string `json:"database"`
+}
+
+type SecurityConfig struct {
+	Bcrypt BcryptConfig `json:"bcrypt"`
+	JWT    JWTConfig    `json:"jwt"`
+	MFA    MFAConfig    `json:"mfa"`
+}
+
+type BcryptConfig struct {
+	WorkFactor int `json:"workFactor"`
+}
+
+type JWTConfig struct {
+	SecretKey             string `json:"secretKey"`
+	AccessDurationMinutes int    `json:"accessDurationMinutes"`
+}
+
+type MFAConfig struct {
+	OTPLength         int `json:"otpLength"`
+	ExpirationMinutes int `json:"expirationMinutes"`
 }
 
 func NewConfig() (*Config, error) {
