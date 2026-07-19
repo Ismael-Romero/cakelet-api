@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/Ismael-Romero/cakelet-suite/config"
+	"github.com/Ismael-Romero/cakelet-suite/core/security"
 	"go.uber.org/fx"
 )
 
@@ -10,6 +11,7 @@ func main() {
 		fx.Provide(config.NewConfig),
 		fx.Invoke(config.TestConfig),
 		fx.Invoke(Setup),
+		security.Module,
 	)
 	app.Run()
 }
