@@ -20,6 +20,7 @@ This project is built using the following core language version and dependencies
 ### Core Dependencies
 | Package | Version | Purpose / Description |
 | :--- | :---: | :--- |
+| `github.com/golang-jwt/jwt/v5` | `v5.3.1` | JSON Web Token implementation for Go |
 | `go.uber.org/fx` | `v1.24.0` | Application framework and dependency injection |
 | `go.uber.org/zap` | `v1.26.0` | Blazing fast, structured, logged logging framework |
 | `go.uber.org/dig` | `v1.19.0` | Underlying graph-based dependency injection toolkit |
