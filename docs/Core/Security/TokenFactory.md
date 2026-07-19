@@ -7,20 +7,37 @@
 
 # 1. Introduction & Responsibility
 
-The `TokenFactory` is a core component within the authentication subsystem responsible
-for the generation, signing, and validation of JSON Web Tokens (JWT).
+The `TokenFactory` is a core component within the security subsystem responsible for
+the generation, signing, and validation of JSON Web Tokens (JWT).
 
-Its primary purpose is to provide a secure and standardized mechanism for managing
-authenticated sessions and user identities across the platform, while abstracting
-cryptographic implementation details from higher-level application services.
+Its primary responsibility is to provide a secure abstraction over JWT cryptographic
+operations while keeping authentication workflows independent from token implementation
+details.
 
-The component establishes a clear security boundary between authentication workflows
-and token management responsibilities. It does not handle user authentication,
-authorization decisions, persistence operations, or session lifecycle management.
-Instead, it provides a controlled interface for creating and validating cryptographic
+The component is responsible for:
+
+- Generating signed JWT tokens.
+- Applying standard JWT registered claims.
+- Validating JWT signatures.
+- Validating token expiration and registered claims.
+- Extracting trusted token payload information.
+
+The `TokenFactory` does not manage:
+
+- User authentication.
+- User accounts.
+- Authorization decisions.
+- Persistence operations.
+- Session storage.
+- Token revocation.
+- Refresh token rotation.
+- MFA verification workflows.
+
+Token purpose and lifetime are defined by higher-level authentication services. The
+`TokenFactory` only provides the cryptographic mechanism required to create and validate
 tokens.
 
-The architectural responsibility can be summarized as follows:
+The architectural boundary can be summarized as:
 
 ```text
 Authentication Service
@@ -31,7 +48,7 @@ Authentication Service
           |
           |
           v
- Signed JWT Tokens
+ Signed JWT Generation / Validation
 ```
 
 The responsibility of the component ends once the token has been generated or validated.
@@ -40,59 +57,87 @@ The responsibility of the component ends once the token has been generated or va
 
 # 2. Design & Architecture
 
-The `TokenFactory` follows the architectural standards defined by the Uber Go Style
-Guide and is designed to integrate with the Uber Fx dependency injection framework.
+The `TokenFactory` follows the security subsystem architectural principles:
 
-The component follows these principles:
+- Stateless operation.
+- Cryptographic isolation.
+- Interface-based abstraction.
+- Constructor dependency injection.
+- Independent testability.
+
+The component does not store generated tokens or authentication state.
 
 ---
 
-## 2.1 Interface-Based Abstraction
+# 2.1 Interface-Based Abstraction
 
 The component exposes the `TokenFactory` interface as its public contract.
-
-This abstraction provides:
-
-- Decoupling between consumers and implementation details.
-- Easier unit testing through mock implementations.
-- Improved maintainability by isolating JWT-related operations.
 
 Example:
 
 ```go
 type TokenFactory interface {
-    GenerateToken(userID string, duration time.Duration) (string, error)
-    ValidateToken(tokenString string) (*TokenClaims, error)
+    GenerateToken(
+        userID string,
+        duration time.Duration,
+    ) (string, error)
+
+    ValidateToken(
+        tokenString string,
+    ) (*TokenClaims, error)
 }
 ```
 
 Higher-level services depend on the interface rather than the concrete implementation.
 
+This provides:
+
+- Easier unit testing.
+- Reduced coupling.
+- Ability to replace the underlying JWT implementation.
+
 ---
 
-## 2.2 Dependency Injection
+# 2.2 Dependency Injection
 
-The component constructor uses Uber Fx dependency injection through the
-`TokenFactoryParams` structure.
+The component integrates with Uber Fx through constructor-based dependency injection.
 
-Example:
+The constructor receives the application configuration dependency:
 
 ```go
-type TokenFactoryParams struct {
-    fx.In
-
-    Config Config
-}
+func NewTokenFactory(cfg *config.Config) TokenFactory
 ```
 
-The required cryptographic dependencies, including the JWT signing secret
-(`jwt_secret`), are injected through the application configuration module.
+Uber Fx resolves the required dependencies automatically through the application
+dependency graph.
 
-This approach provides:
+The security module registers the component using:
 
-- Centralized configuration management.
-- Improved testability.
-- Reduced coupling between components.
+```go
+var Module = fx.Options(
+    fx.Provide(
+        factory.NewPasswordFactory,
+        factory.NewTokenFactory,
+        factory.NewMFAFactory,
+    ),
+)
+```
+
+Uber Fx is responsible for:
+
+- Resolving constructor dependencies.
+- Creating component instances.
+- Managing the dependency graph lifecycle.
+
+The `TokenFactory` does not receive:
+
+- User repositories.
+- Authentication services.
+- Persistence dependencies.
+- MFA services.
+
+Its only external dependency is the application configuration required to obtain the
+JWT signing secret.
 
 ---
 
@@ -101,7 +146,7 @@ This approach provides:
 Generated tokens contain user identity information through the `TokenClaims`
 structure.
 
-The structure extends the standard JWT claims provided by the underlying JWT library.
+The structure extends the standard JWT claims provided by the JWT library.
 
 ---
 
@@ -154,19 +199,22 @@ The `TokenFactory` exposes two primary operations:
 ## Signature
 
 ```go
-GenerateToken(userID string, duration time.Duration) (string, error)
+GenerateToken(
+    userID string,
+    duration time.Duration,
+) (string, error)
 ```
 
 ## Description
 
-Creates a new signed JWT containing the authenticated user's identity.
+Creates a signed JWT containing the authenticated user's identity.
 
-The method performs the following operations:
+The method performs:
 
-1. Validates that the provided user identifier is valid.
+1. Validates that the provided user identifier is not empty.
 2. Creates the JWT claims structure.
 3. Calculates issuance and expiration timestamps.
-4. Signs the token using the configured cryptographic algorithm.
+4. Signs the token using HS256.
 5. Returns the encoded JWT string.
 
 ---
@@ -177,12 +225,16 @@ The method performs the following operations:
 
 The unique identifier of the authenticated user.
 
-The operation rejects empty identifiers because a token without a valid identity reference
-cannot represent an authenticated session.
+The operation rejects empty identifiers because a token without an identity reference
+cannot represent an authenticated principal.
+
+---
 
 ### duration
 
 The requested token lifetime.
+
+The lifetime is defined by the authentication workflow.
 
 Examples:
 
@@ -190,28 +242,9 @@ Examples:
 Access Token:
 1 hour
 
-Temporary Transition Token:
+Temporary Authentication Token:
 3 minutes
 ```
-
----
-
-## Cryptographic Signing
-
-The token is signed using:
-
-```text
-Algorithm:
-HMAC-SHA256 (HS256)
-```
-
-The signing key is obtained from the secure application configuration.
-
-The generated token contains:
-
-- Header.
-- Payload claims.
-- Cryptographic signature.
 
 ---
 
@@ -220,62 +253,57 @@ The generated token contains:
 ## Signature
 
 ```go
-ValidateToken(tokenString string) (*TokenClaims, error)
+ValidateToken(
+    tokenString string,
+) (*TokenClaims, error)
 ```
 
 ## Description
 
-Validates a JWT received from the client and confirms its authenticity and validity.
+Validates a JWT received from an external caller and confirms its authenticity.
 
 The method performs:
 
 1. JWT parsing.
-2. Signature verification.
-3. Signing algorithm validation.
-4. Expiration validation.
+2. Signing algorithm validation.
+3. Cryptographic signature verification.
+4. Registered claims validation.
 5. Claims extraction.
 
-If every validation succeeds, the method returns the decoded `TokenClaims`.
+If every validation succeeds, the method returns the trusted `TokenClaims`.
 
 ---
 
-## Security Validation
+## Cryptographic Validation
 
-The validation process performs strict verification of the signing method.
-
-The expected algorithm is:
+The expected signing algorithm is:
 
 ```text
-jwt.SigningMethodHMAC
+HS256 (HMAC-SHA256)
 ```
 
-This prevents algorithm confusion attacks where an attacker attempts to modify the JWT
-header and bypass signature verification using an unintended algorithm.
+The validation process rejects tokens using unexpected signing methods.
+
+This prevents algorithm confusion attacks where an attacker attempts to use an
+unintended cryptographic algorithm.
 
 ---
 
 # 5. Error Handling
 
-Following the security module conventions, errors generated by `TokenFactory` are
-centralized and prefixed using:
+Errors generated by `TokenFactory` follow the security module convention:
 
 ```text
 security/factory:
 ```
 
-This improves traceability and consistency across application logs.
-
----
-
-## Error Definitions
-
 | Error | Description |
 |---|---|
-| `ErrInvalidToken` | Returned when the token signature is invalid, corrupted, manipulated, or expired. |
-| `ErrEmptyUserID` | Returned by `GenerateToken` when no valid user identifier is provided. |
-| `ErrTokenGeneration` | Returned when the JWT signing operation fails internally. |
-| `ErrUnexpectedSigningMethod` | Returned when the token declares an unexpected signing algorithm. |
-| `ErrTokenParsing` | Returned when the provided JWT string has an invalid structure or cannot be parsed. |
+| `ErrInvalidToken` | Returned when the token is invalid or claims cannot be trusted. |
+| `ErrEmptyUserID` | Returned when token generation receives an empty user identifier. |
+| `ErrTokenGeneration` | Returned when JWT signing fails internally. |
+| `ErrUnexpectedSigningMethod` | Returned when the token uses an unsupported signing algorithm. |
+| `ErrTokenParsing` | Returned when the JWT structure cannot be parsed. |
 
 ---
 
@@ -284,7 +312,7 @@ This improves traceability and consistency across application logs.
 The `TokenFactory` is consumed by authentication services after successful identity
 verification.
 
-The component remains isolated from authentication decisions and only manages token
+The component remains isolated from authentication decisions and only performs JWT
 operations.
 
 ```mermaid
@@ -304,7 +332,7 @@ sequenceDiagram
 
     Factory-->>Auth: Signed JWT Token
 
-    Auth-->>Client: Return Authentication Session
+    Auth-->>Client: Return Authentication Token
 
 
     Note over Auth,Factory: Token Validation Flow
@@ -313,85 +341,75 @@ sequenceDiagram
 
     Auth->>Factory: ValidateToken(token)
 
-    Factory->>Factory: Verify Signature
-    Factory->>Factory: Validate Algorithm
-    Factory->>Factory: Validate Expiration
+    Factory->>Factory: Validate Signature
+    Factory->>Factory: Validate Signing Algorithm
+    Factory->>Factory: Validate Registered Claims
 
-    Factory-->>Auth: TokenClaims
+    Factory-->>Auth: Token Claims
 
     Auth->>Auth: Continue Protected Operation
 ```
 
 ---
 
-# 7. Uber Fx Integration
+# 7. Security Requirements
 
-The component is registered in the application's dependency graph through the security
-module.
-
-Example:
-
-```go
-// security/module.go
-
-var Module = fx.Options(
-    fx.Provide(
-        factory.NewPasswordFactory,
-        factory.NewTokenFactory,
-    ),
-)
-```
-
-Once registered, any component requiring token operations can receive the
-`TokenFactory` dependency through constructor injection.
-
----
-
-# 8. Security Requirements
-
-The `TokenFactory` implementation must follow these security principles:
-
-## 8.1 Secret Protection
+## 7.1 Secret Protection
 
 The JWT signing secret must:
 
 - Never be hardcoded.
 - Never be logged.
 - Never be exposed through API responses.
-- Be managed through secure configuration mechanisms.
+- Be managed through secure configuration.
 
 ---
 
-## 8.2 Token Lifetime Control
+## 7.2 Token Lifetime Control
 
-Tokens must have explicit expiration times.
+Every generated token must include an explicit expiration timestamp.
 
-Recommended usage:
+Token lifetime decisions belong to authentication workflows.
+
+Example:
 
 | Token Type | Lifetime |
 |---|---|
-| Access Token | 1 hour |
-| Refresh Token | 1 hour and 10 minutes |
-| Temporary Authentication Token | 3 minutes |
+| Access Token | Defined by authentication policy |
+| Refresh Token | Defined by authentication policy |
+| Temporary Authentication Token | Defined by authentication policy |
 
 ---
 
-## 8.3 Signature Verification
+## 7.3 Signature Verification
 
 Every received token must be validated before trusting its claims.
 
-The system must never rely solely on decoded JWT payload data without verifying the
-cryptographic signature.
+The system must never rely solely on decoded JWT payload information without verifying
+the cryptographic signature.
 
 ---
 
-# 9. Design Principles Summary
+## 7.4 Stateless Operation
+
+The `TokenFactory`:
+
+- Does not persist tokens.
+- Does not store sessions.
+- Does not track token usage.
+- Does not maintain revocation state.
+
+Token revocation, rotation, and lifecycle policies belong to higher-level services.
+
+---
+
+# 8. Design Principles Summary
 
 The `TokenFactory` follows these architectural principles:
 
-- **Single Responsibility:** Manages JWT creation and validation only.
+- **Single Responsibility:** Handles JWT generation and validation only.
 - **Interface Driven Design:** Provides abstraction for testing and maintenance.
-- **Dependency Injection:** Integrates through Uber Fx for controlled configuration.
+- **Constructor Dependency Injection:** Integrates with Uber Fx through registered constructors.
 - **Cryptographic Isolation:** Encapsulates signing and verification details.
-- **Secure Defaults:** Enforces expiration and signing algorithm validation.
-- **Stateless Operation:** Does not persist tokens or authentication state.
+- **Secure Defaults:** Enforces expiration handling and signing algorithm validation.
+- **Stateless Operation:** Does not persist authentication state.
