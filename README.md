@@ -2,6 +2,9 @@
 
 ## Getting Started
 
+To learn more about this project, consult the
+[cakelet-docs](https://github.com/Ismael-Romero/cakelet-api) repository.
+
 ### Running the Application
 
 To run the application locally, execute the following command from the root directory of the project:
