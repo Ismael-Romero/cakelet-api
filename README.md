@@ -3,7 +3,7 @@
 ## Getting Started
 
 To learn more about this project, consult the
-[cakelet-docs](https://github.com/Ismael-Romero/cakelet-api) repository.
+[cakelet-docs](https://github.com/Ismael-Romero/cakelet-docs) repository.
 
 ### Running the Application
 
