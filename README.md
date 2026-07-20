@@ -1,4 +1,4 @@
-# Cakelet Api
+# Cakelet API
 
 ## Getting Started
 
